@@ -482,8 +482,10 @@ def append_constant_fields(ctx, obj, fields, value):
 
     if not isinstance(value, (list, tuple)):
         constants = (value, )
+    else:
+        constants = value
 
-    output_fields = obj_fields + fields
+    output_fields = obj.fields + fields
 
     return IterableDataSource(iterator(constants), output_fields)
 
@@ -601,6 +603,31 @@ def text_substitute(ctx, iterator, field, substitutions):
             value = re.sub(pattern, repl, value)
         row[index] = value
 
+        yield row
+
+@operation("rows")
+@unary_iterator
+@experimental
+def empty_to_missing(ctx, iterator, fields=None, strict=False):
+    """Converts empty strings into `None` values."""
+    if fields:
+        if strict:
+            fields = iterator.fields.fields(fields)
+        else:
+            array = []
+            for field in fields:
+                if field in iterator.fields:
+                    array.append(field)
+            fields = array
+    else:
+        fields = iterator.fields.fields(storage_type="string")
+
+    indexes = iterator.fields.indexes(fields)
+
+    for row in iterator:
+        row = list(row)
+        for index in indexes:
+            row[index] = row[index] if row[index] else None
         yield row
 
 @operation("rows")

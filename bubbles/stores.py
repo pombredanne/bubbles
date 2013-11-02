@@ -3,6 +3,8 @@
 from .errors import *
 from .metadata import *
 from .extensions import *
+from .objects import data_object
+import os.path
 
 __all__ = [
         "DataStore",
@@ -64,7 +66,7 @@ class DataStore(object):
     def __getitem__(self, name):
         return self.get_object(name)
 
-    def create(name, fields, replace=False, from_obj=None, temporary=False,
+    def create(self, name, fields, replace=False, from_obj=None, temporary=False,
                **options):
         """Args:
             * replace
@@ -73,6 +75,11 @@ class DataStore(object):
               disconnected
         """
         pass
+
+    def exists(self, name):
+        """Return `True` if object with `name` exists, otherwise returns
+        `False`. Subclasses should implement this method."""
+        raise NotImplementedError
 
     def create_temporary(fields, from_obj=None, **options):
         """Creates a temporary data object"""
@@ -120,6 +127,38 @@ class SimpleMemoryStore(DataStore):
 
     def exists(name):
         return name in catalogue
+
+
+class FileSystemStore(DataStore):
+    __identifier__ = "file"
+
+    def __init__(self, path):
+        """Creates a store for source objects stored on a local file system.
+        The type of the object is determined from the file extension.
+        Supported extensions and file types:
+
+        * `csv` - CSV source object (read-only)
+        * `xls` – MS Excel object
+        """
+
+        super().__init__()
+        self.path = path
+
+    def get_object(self, name):
+        """Returns a CSVSource object with filename constructed from store's
+        path and extension"""
+        path = os.path.join(self.path, name)
+        ext = os.path.splitext(name)[1]
+
+        ext = ext[1:] if ext else ext
+
+        if ext == "csv":
+            return data_object("csv_source", path)
+        elif ext == "xls":
+            return data_object("xls", path)
+        else:
+            raise ArgumentError("Unknown extension '%s'" % ext)
+
 
 def copy_object(source_store, source_name, target_store,
                 target_name=None, create=False, replace=False):
