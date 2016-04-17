@@ -59,7 +59,7 @@ class ExecutionEngine(object):
         `context`.
 
         `stores` is a mapping of store names and opened data stores. Stores
-        are used when resoving data sources by reference.
+        are used when resolving data sources by reference.
 
         Execution engine is also used in :class:`Pipeline` objects to run the
         pipelines.
@@ -132,7 +132,18 @@ class ExecutionEngine(object):
 
         # TODO: write documentation about consumable objects
 
+        # FIXME: FROM HERE vvvvvvv
+        for name, store in self.stores.items():
+            if isinstance(store, dict):
+                store = dict(store)
+                type_ = store.pop("type")
+                store = open_store(type_, **store)
+                self._owned_stores.append(store)
+
+            self.stores[name] = store
+
         plan = self.execution_plan(graph)
+        # FIXME: TO HERE ^^^^^^^
 
         # Set of already consumed nodes
         consumed = set()

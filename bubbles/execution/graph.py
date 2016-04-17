@@ -35,16 +35,15 @@ class Node(NodeBase):
     def evaluate(self, engine, context, operands=None):
         """Evaluates the operation with name `opname` within `context`"""
         # fixme: identify operands in *args
-        op = context.operation(self.opname)
         args = list(operands) + list(self.args)
-        result = op(*args, **self.kwargs)
+        result = context.call(self.opname, *args, **self.kwargs)
         return result
 
     def __str__(self):
         return "operation %s" % self.opname
 
     def outlets(self, context):
-        prototype = context.operation_prototype(self.opname)
+        prototype = context.operation(self.opname)
         return prototype.operands
 
 
@@ -85,7 +84,7 @@ class StoreObjectNode(NodeBase):
 
 
     def __str__(self):
-        return "soure %s in %s" % (self.objname, self.store)
+        return "source %s in %s" % (self.objname, self.store)
 
 class ObjectNode(NodeBase):
     def __init__(self, obj):
@@ -344,7 +343,7 @@ class Graph(object):
         #     output message (proposed topologically sorted order: L)
 
         if connections:
-            raise Exception("Steram has at least one cycle (%d connections left of %d)" % (len(connections), len(self.connections)))
+            raise Exception("Stream has at least one cycle (%d connections left of %d)" % (len(connections), len(self.connections)))
 
         return sorted_nodes
 
@@ -365,5 +364,3 @@ class Graph(object):
                 nodes[conn.outlet] = conn.source
 
         return nodes
-
-

@@ -19,25 +19,27 @@ try:
     _sql_to_bubbles_types = (
         (sqlalchemy.types.UnicodeText, "text", "typeless"),
         (sqlalchemy.types.Text, "text", "typeless"),
-        (sqlalchemy.types.Unicode, "string", "set"),
-        (sqlalchemy.types.String, "string", "set"),
+        (sqlalchemy.types.Unicode, "string", "nominal"),
+        (sqlalchemy.types.String, "string", "nominal"),
         (sqlalchemy.types.Integer, "integer", "discrete"),
-        (sqlalchemy.types.Numeric, "float", "range"),
-        (sqlalchemy.types.DateTime, "date", "typeless"),
+        (sqlalchemy.types.Numeric, "float", "measure"),
+        (sqlalchemy.types.DateTime, "datetime", "typeless"),
         (sqlalchemy.types.Date, "date", "typeless"),
-        (sqlalchemy.types.Time, "unknown", "typeless"),
+        (sqlalchemy.types.Time, "time", "typeless"),
         (sqlalchemy.types.Interval, "unknown", "typeless"),
         (sqlalchemy.types.Boolean, "boolean", "flag"),
-        (sqlalchemy.types.Binary, "unknown", "typeless")
+        (sqlalchemy.types.Binary, "binary", "typeless")
     )
 
     concrete_sql_type_map = {
         "string": sqlalchemy.types.Unicode,
         "text": sqlalchemy.types.UnicodeText,
         "date": sqlalchemy.types.Date,
-        "time": sqlalchemy.types.DateTime,
+        "time": sqlalchemy.types.Time,
+        "datetime": sqlalchemy.types.DateTime,
+        "binary": sqlalchemy.types.Binary,
         "integer": sqlalchemy.types.Integer,
-        "float": sqlalchemy.types.Numeric,
+        "number": sqlalchemy.types.Numeric,
         "boolean": sqlalchemy.types.SmallInteger
     }
 
@@ -206,7 +208,7 @@ def _postgres_copy_from(self, connection, table, stream, is_csv=True,
 class SQLDataStore(DataStore):
     """Holds context of SQL store operations."""
 
-    __identifier__ = "sql"
+    __extension_name__ = "sql"
 
     _bubbles_info = {
         "options": [
@@ -413,7 +415,7 @@ class SQLDataStore(DataStore):
     def execute(self, statement, *args, **kwargs):
         """Executes `statement` in store's connectable"""
         # TODO: Place logging here
-        # self.logger.debug("SQL: %s" % str(statement))
+        self.logger.debug("EXECUTE SQL: %s" % str(statement))
         return self.connectable.execute(statement, *args, **kwargs)
 
 class SQLDataObject(DataObject):

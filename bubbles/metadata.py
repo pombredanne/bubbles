@@ -5,7 +5,7 @@ import functools
 import re
 import inspect
 import warnings
-from .common import get_logger
+from .common import get_logger, IgnoringDictionary
 from .errors import *
 
 # from collections import OrderedDict
@@ -20,7 +20,8 @@ __all__ = [
     "distill_aggregate_measures",
     "prepare_key",
     "prepare_aggregation_list",
-    "prepare_order_list"
+    "prepare_order_list",
+    "DEFAULT_ANALYTICAL_TYPES"
 ]
 
 """Abstracted field storage types"""
@@ -29,11 +30,20 @@ storage_types = (
         "string",   # names, labels, up to hundreds of hundreds of chars
         "text",     # bigger text storage
         "integer",  # integer numeric types
-        "float",    # floating point types
-        "boolean",
-        "date",
+        "number",    # floating point types
+
+        "boolean",  # two-state value
+
+        "datetime", # Full date and time with time zone
+        "time",     # time without a date
+        "date",     #
+
         "array",    # ordered collection type
-        "document", # JSON-like object
+        "object",   # JSON-like object
+        "binary",   # any representation of binary data (byte string or base64
+                    # encoded string
+
+        "geopoint", # a tuple: (longitude, latitude)
     )
 
 
@@ -51,25 +61,31 @@ analytical_types = ("default",  # unspecified or based on storage type
 """Mapping between storage types and their respective default analytical
 types"""
 # NOTE: For the time being, this is private
-default_analytical_types = {
+DEFAULT_ANALYTICAL_TYPES = {
                 "unknown": "typeless",
                 "string": "typeless",
                 "text": "typeless",
                 "integer": "discrete",
-                "float": "measure",
+                "number": "measure",
                 "date": "typeless",
                 "array": "typeless",
                 "document": "typeless"
             }
 
-_valid_retype_attributes = ("storage_type",
-                     "analytical_type",
-                     "concrete_storage_type",
-                     "missing_values")
 
-_field_attributes = ["name", "storage_type", "analytical_type",
-                     "concrete_storage_type", "size", "missing_values",
-                     "label", "info", "origin", "owner"]
+FIELD_ATTRIBUTES = (
+    "name",
+    "label",
+    "storage_type",
+    "analytical_type",
+    "concrete_storage_type",
+    "size",
+    "missing_value",
+    "info",
+    "origin",
+    "description"
+)
+
 
 def to_field(obj):
     """Converts `obj` to a field object. `obj` can be ``str``, ``tuple``
@@ -114,7 +130,7 @@ def to_field(obj):
                 pass
 
         elif isinstance(obj, dict):
-            for attr in _field_attributes:
+            for attr in FIELD_ATTRIBUTES:
                 if attr in obj:
                     d[attr] = obj[attr]
 
@@ -124,10 +140,12 @@ def to_field(obj):
         if "analytical_type" not in d:
             storage_type = d.get("storage_type")
             if storage_type:
-                deftype = default_analytical_types.get(storage_type)
+                deftype = DEFAULT_ANALYTICAL_TYPES.get(storage_type)
 
         field = Field(**d)
+
     return field
+
 
 class Field(object):
     """`Field` is a metadata that describes part of data object's structure.
@@ -163,32 +181,27 @@ class Field(object):
     """
     # TODO: make this public once ownership mechanism is redesigned
     # * `origin` – field or field list from which this field was derived
-    # * `owner` – object responsible for creation of this field
-
+    # * `owner` – object that created this field
 
     attribute_defaults = {
                 "storage_type":"string",
                 "analytical_type": None
             }
 
-    def __init__(self, *args, **kwargs):
-        super(Field,self).__init__()
+    def __init__(self, name=None, storage_type=None, analytical_type=None,
+                 concrete_storage_type=None, size=None, missing_value=None,
+                 label=None, info=None, origin=None, description=None):
 
-        remaining = set(_field_attributes)
-
-        for name, value in zip(_field_attributes, args):
-            setattr(self, name, value)
-            remaining.remove(name)
-
-        for name, value in kwargs.items():
-            if name in remaining:
-                setattr(self, name, value)
-                remaining.remove(name)
-            else:
-                raise ValueError("Argument %s specified more than once" % name)
-
-        for name in remaining:
-            setattr(self, name, self.attribute_defaults.get(name, None))
+        self.name = name
+        self.storage_type = storage_type
+        self.analytical_type = analytical_type
+        self.concrete_storage_type = concrete_storage_type
+        self.size = size
+        self.missing_value = missing_value
+        self.label = label
+        self.info = info
+        self.origin = origin
+        self.description = description
 
     def clone(self, **attributes):
         """Clone a field and set attributes"""
@@ -198,13 +211,26 @@ class Field(object):
 
     def to_dict(self):
         """Return dictionary representation of the field."""
-        d = {}
-        for name in _field_attributes:
-            d[name] = getattr(self, name)
+        d = IgnoringDictionary()
+
+        # Note: the ignoring dictionary skips empty values. It also preserves
+        # the orider (for nicer JSON output)
+        for attr in FIELD_ATTRIBUTES:
+            d[attr] = getattr(self, attr)
+
         return d
 
-    def __copy__(self):
-        field = Field(**self.to_dict())
+    def __deepcopy__(self, memo):
+        field = Field(self.name,
+                      self.storage_type,
+                      self.analytical_type,
+                      self.concrete_storage_type,
+                      self.size,
+                      self.missing_value,
+                      self.label,
+                      copy.deepcopy(self.info, memo),
+                      self.origin,
+                      self.description)
         return field
 
     def __str__(self):
@@ -217,24 +243,18 @@ class Field(object):
     def __eq__(self, other):
         if self is other:
             return True
+
         if not isinstance(other, Field):
             return False
 
-        # TODO: ignore origin
-        for name in _field_attributes:
-            if getattr(self, name) != getattr(other, name):
+        for attr in FIELD_ATTRIBUTES:
+            if getattr(self, attr) != getattr(other, attr):
                 return False
         return True
 
     def __ne__(self,other):
         return not self.__eq__(other)
 
-    def __hash__(self):
-        # Hash should be the same as the one of field's origin
-        if isinstance(self.origin, Field):
-            return hash(self.origin)
-        else:
-            return self.name.__hash__()
 
 class FieldList(object):
     """List of fields"""
@@ -277,7 +297,7 @@ class FieldList(object):
         """Appends a field to the list. This method requires `field` to be
         instance of `Field`"""
 
-        # FIXME: depreciated: FieldList should be immutable
+        # FIXME: deprecated: FieldList should be immutable
         field = to_field(field)
         self._fields.append(field)
         self._field_dict[field.name] = field
@@ -296,7 +316,6 @@ class FieldList(object):
             return names
         else:
             return self._field_names
-
 
     def indexes(self, fields):
         """Return a tuple with indexes of fields from ``fields`` in a data row. Fields
@@ -365,7 +384,7 @@ class FieldList(object):
 
         Example:
 
-        >>> agg_list = aggregation_list(['amount', ('discount', 'avg')])
+        >>> agg_list = prepare_aggregation_list(['amount', ('discount', 'avg')])
         >>> agg_fields = fields.aggregated_fields(agg_list)
 
         Will return fields with names: `('amount_sum', 'discount_avg',
@@ -374,20 +393,24 @@ class FieldList(object):
 
         agg_fields = FieldList()
 
-        for measure in measures:
+        for measure in aggregation_list:
             if isinstance(measure, (str, Field)):
                 field = str(measure)
-                index = fields.index(field)
+                index = self.index(field)
                 aggregate = "sum"
             elif isinstance(measure, (list, tuple)):
                 field = measure[0]
-                index = fields.index(field)
+                index = self.index(field)
                 aggregate = measure[1]
 
-            field = fields.field(measure)
-            field = field.clone(name="%s_%s" % (str(measure), aggregate),
+            field = self.field(field)
+            field = field.clone(name="%s_%s" % (str(field), aggregate),
                                 analytical_type="measure")
             agg_fields.append(field)
+
+        if include_count:
+            agg_fields.append(Field(
+                count_field, storage_type="integer", analytical_type="measure"))
 
         return agg_fields
 
@@ -461,7 +484,9 @@ class FieldList(object):
         return FieldList(*self._fields)
 
     def clone(self, fields=None, origin=None, owner=None):
-        """Creates a copy of the list and copy of the fields.
+        """Creates a copy of the list and copy of the fields. Automatically
+        sets the origin of fields to be the original field or `origin` if
+        specified.
         """
         fields = self.fields(fields)
 
@@ -472,6 +497,7 @@ class FieldList(object):
             cloned_fields.append(new_field)
 
         return cloned_fields
+
 
 class FieldFilter(object):
     """Filters fields in a stream"""
@@ -655,6 +681,9 @@ def prepare_order_list(fields):
 def prepare_tuple_list(fields, default_value):
     """Coalesces list of fields to list of tuples. Accepts: a string, list of
     strings, list of tuples `(field, value)`. """
+
+    if not fields:
+        return []
 
     result = []
 

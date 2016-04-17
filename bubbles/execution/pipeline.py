@@ -2,18 +2,24 @@
 
 from .context import default_context
 from .engine import ExecutionEngine
+from ..stores import open_store
 from .graph import *
 from ..errors import *
 from ..dev import experimental
+from functools import wraps
 
 __all__ = [
             "Pipeline"
         ]
 
+
+# TODO: rename to Process
+# TODO: remove requirement of context or name it as bind= (?)
+# TODO: make sure that no part of the pipeline requires context
 class Pipeline(object):
     def __init__(self, stores=None, context=None, graph=None, name=None):
-        """Creates a new pipeline with `context` and sets current object to
-        `obj`. If no context is provided, default one is used.
+        """Creates a new pipeline with `context`.  If no context is provided,
+        default context is used.
 
         Pipeline inherits operations from the `context` and uses context's
         dispatcher to call the operations. Operations are provided as
@@ -38,18 +44,32 @@ class Pipeline(object):
             execution engine class with custom execution policy.
 
         """
+        # We need the context to get number of operads for every argument
+        # FIXME: is this really necessary?
         self.context = context or default_context
         self.stores = stores or {}
+
         self.graph = graph or Graph()
         self.name = name
 
         # Set default execution engine
         self.engine_class = ExecutionEngine
 
+        # Current node
         self.node = None
+        self.labels = {}
 
         self._test_if_needed = None
         self._test_if_satisfied = None
+
+    def clone(self):
+        """Creates a clone of the pipeline. The clone is a semi-shallow copy,
+        with new graph and labels instances.  """
+
+        clone = copy(self)
+        clone.graph = copy(self.graph)
+        clone.labels = dict(self.labels)
+        return clone
 
     def source(self, store, objname, **params):
         """Appends a source node to an empty pipeline. The source node will
@@ -252,6 +272,13 @@ class Pipeline(object):
         self._test_if_satisfied = Pipeline(self.stores, self.context)
         return self._test_if_satisfied
 
+    def label(self, name):
+        """Assigns a label to the last node in the pipeline. This node can be
+        later refereced as `pipeline[label]`. This method modifies the
+        pipeline."""
+        self.labels[name] = self.node
+        return self
+
 class _PipelineOperation(object):
     def __init__(self, pipeline, opname):
         """Creates a temporary object that will append an operation to the
@@ -270,9 +297,9 @@ class _PipelineOperation(object):
         # – `operands` might be either a node - received throught
         # pipeline.node or it might be a pipeline forked from the receiver
 
-        prototype = self.pipeline.context.operation_prototype(self.opname)
+        operation = self.pipeline.context.operation(self.opname)
 
-        if prototype.operand_count == 1:
+        if operation.opcount == 1:
             # Unary operation
             node = Node(self.opname, *args, **kwargs)
             self.pipeline._append_node(node)
@@ -282,12 +309,12 @@ class _PipelineOperation(object):
             # - the one that is just being created by this function as default
             # operand within the processing pipeline.
 
-            operands = args[0:prototype.operand_count-1]
-            args = args[prototype.operand_count-1:]
+            operands = args[0:operation.opcount-1]
+            args = args[operation.opcount-1:]
 
             # Get name of first (pipeline default) outlet and rest of the
             # operand outlets
-            firstoutlet, *restoutlets = prototype.operands
+            firstoutlet, *restoutlets = operation.operands
 
             # Pipeline node - default
             node = Node(self.opname, *args, **kwargs)
@@ -307,4 +334,15 @@ class _PipelineOperation(object):
                 self.pipeline.graph.connect(src_node, node, outlet)
 
         return self.pipeline
+
+def create_pipeline(description):
+    """Create a pipeline from a description. Description should be a list of
+    operation descriptions. The operation is described as a tuple where first
+    item is the operation name followed by operands. Last argument is a
+    dictionary with options.
+
+        ["operation", "operand", "operand", {foo}]
+    """
+
+    raise NotImplementedError
 
